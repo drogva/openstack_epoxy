@@ -185,11 +185,11 @@
       project_domain_name: "Default"
     name: public-subnet
     network_name: public
-    cidr: 172.30.1.0/24
-    gateway_ip: 172.30.1.254       # 말씀하신 gateway4 주소
+    cidr: 192.168.0.0/24
+    gateway_ip: 192.168.0.1       # 말씀하신 gateway4 주소
     dns_nameservers: [8.8.8.8]
-    allocation_pool_start: 172.30.1.200 # 외부망과 겹치지 않는 범위 선택
-    allocation_pool_end: 172.30.1.250
+    allocation_pool_start: 192.168.0.200 # 외부망과 겹치지 않는 범위 선택
+    allocation_pool_end: 192.168.0.250
     enable_dhcp: false # 외부망은 보통 DHCP를 끕니다
     state: present
 
