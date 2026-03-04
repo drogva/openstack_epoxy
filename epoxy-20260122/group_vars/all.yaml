@@ -1,0 +1,54 @@
+---
+# 1. 근본 변수 (대문자 PASS) - 여기만 수정하면 다 바뀝니다.
+COMMON_PASS: "soldesk"
+
+# 2. 서비스별 대문자 변수
+ADMIN_PASS: "{{ COMMON_PASS }}"
+RABBIT_PASS: "{{ COMMON_PASS }}"
+KEYSTONE_DBPASS: "{{ COMMON_PASS }}"
+GLANCE_DBPASS: "{{ COMMON_PASS }}"
+GLANCE_PASS: "{{ COMMON_PASS }}"
+PLACEMENT_DBPASS: "{{ COMMON_PASS }}"
+PLACEMENT_PASS: "{{ COMMON_PASS }}"
+NOVA_DBPASS: "{{ COMMON_PASS }}"
+NOVA_PASS: "{{ COMMON_PASS }}"
+NEUTRON_DBPASS: "{{ COMMON_PASS }}"
+NEUTRON_PASS: "{{ COMMON_PASS }}"
+OCTAVIA_DBPASS: "{{ COMMON_PASS }}"
+OCTAVIA_PASS: "{{ COMMON_PASS }}"
+METADATA_SECRET: "{{ COMMON_PASS }}"
+KEYSTONE_PASS: "{{ COMMON_PASS }}"
+db_root_password: "{{ COMMON_PASS }}"
+GLANCE_ENDPOINT_ID: "glance"
+
+# 3. 템플릿 호환성을 위한 소문자 매핑 (Alias)
+# 템플릿에 소문자로 되어 있어도 위 대문자 값을 가져옵니다.
+keystone_dbpassword: "{{ KEYSTONE_DBPASS }}"
+glance_dbpass: "{{ GLANCE_DBPASS }}"
+glance_pass: "{{ GLANCE_PASS }}"
+placement_dbpass: "{{ PLACEMENT_DBPASS }}"
+placement_pass: "{{ PLACEMENT_PASS }}"
+nova_dbpass: "{{ NOVA_DBPASS }}"
+nova_pass: "{{ NOVA_PASS }}"
+neutron_dbpass: "{{ NEUTRON_DBPASS }}"
+neutron_pass: "{{ NEUTRON_PASS }}"
+octavia_dbpass: "{{ OCTAVIA_DBPASS }}"
+octavia_pass: "{{ OCTAVIA_PASS }}"
+rabbit_password: "{{ RABBIT_PASS }}"
+keystone_admin_password: "{{ KEYSTONE_PASS }}"
+placement_allow_all: true
+# 4. 인프라 정보
+controller_host: "controller"
+controller_ip: "192.168.0.146"
+compute_ip: "192.168.0.150"
+mgmt_ip: "{{ controller_ip }}"
+mgmt_network_cidr: "172.30.1.0/24"
+network_cidr: "192.168.0.0/24"
+
+public_subnet_cidr: "172.30.1.0/24"
+public_gateway: "172.30.1.254"
+public_pool_start: "172.30.1.200"
+public_pool_end: "172.30.1.250"
+  
+external_bridge: "br-ens34"
+external_interface: "ens34"

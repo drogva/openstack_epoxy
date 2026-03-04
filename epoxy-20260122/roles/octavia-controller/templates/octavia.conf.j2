@@ -1,0 +1,75 @@
+[DEFAULT]
+transport_url = rabbit://openstack:{{ rabbit_password }}@{{ controller_ip }}:5672/
+
+[api_settings]
+# 외부 접근을 위해 0.0.0.0 권장 (가이드는 127.0.0.1)
+bind_host = 0.0.0.0
+bind_port = 9876
+auth_strategy = keystone
+api_base_uri = http://{{ mgmt_ip }}:9876
+
+[database]
+connection = mysql+pymysql://octavia:{{ OCTAVIA_DBPASS }}@{{ controller_ip }}/octavia
+
+[health_manager]
+# 하트비트 수신 IP (컨트롤러 IP)
+bind_ip = {{ controller_ip }}
+bind_port = 5555
+
+[keystone_authtoken]
+www_authenticate_uri = http://{{ controller_ip }}:5000
+auth_url = http://{{ controller_ip }}:5000
+memcached_servers = {{ controller_ip }}:11211
+auth_type = password
+project_domain_name = Default
+user_domain_name = Default
+project_name = service
+username = octavia
+password = {{ OCTAVIA_PASS }}
+
+[certificates]
+ca_private_key = /etc/octavia/certs/private/server_ca.key.pem
+ca_certificate = /etc/octavia/certs/server_ca.cert.pem
+# 스크립트 기본 암호 (가이드 기준)
+server_certs_key_passphrase = insecure-key-do-not-use-this-key
+ca_private_key_passphrase = not-secure-passphrase
+
+[haproxy_amphora]
+server_ca = /etc/octavia/certs/server_ca-chain.cert.pem
+client_cert = /etc/octavia/certs/private/client.cert-and-key.pem
+
+[controller_worker]
+client_ca = /etc/octavia/certs/client_ca.cert.pem
+
+[oslo_messaging]
+topic = octavia_prov
+
+[service_auth]
+auth_url = http://{{ controller_ip }}:5000
+memcached_servers = {{ controller_ip }}:11211
+auth_type = password
+project_domain_name = Default
+user_domain_name = Default
+project_name = service
+username = octavia
+password = {{ OCTAVIA_PASS }}
+
+
+[controller_worker]
+client_ca = /etc/octavia/certs/client_ca.cert.pem
+amp_image_tag = Amphora
+amp_flavor_id = 100
+# 여기서 관리용 가상 네트워크 ID를 지정합니다.
+amp_secgroup_list = {{ lb_secgroup_id }}
+amp_boot_network_list = {{ public_net_id }}
+amp_mgmt_net_name = public
+
+network_driver = allowed_address_pairs_driver
+compute_driver = compute_nova_driver
+amphora_driver = amphora_haproxy_rest_driver
+
+[health_manager]
+# 핵심 수정: 컨트롤러가 Public 망에서 통신할 IP (o-hm0가 아닌 실제 인터페이스 IP)
+# 172.30.1.x 대역 중 컨트롤러가 외부와 통신하는 IP를 적어주세요.
+bind_ip = 172.30.1.19 
+bind_port = 5555

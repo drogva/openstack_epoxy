@@ -1,0 +1,62 @@
+---
+# 1. MariaDB 및 파이썬 라이브러리 설치
+- name: MariaDB 서버 및 PyMySQL 설치
+  dnf:
+    name:
+      - mariadb
+      - mariadb-server
+      - python3-PyMySQL  # 앤서블이 DB를 제어할 때 필요한 라이브러리
+    state: present
+
+# 2. openstack.cnf 설정 파일 생성 (템플릿 활용)
+- name: OpenStack 전용 MariaDB 설정 파일 생성
+  template:
+    src: openstack.cnf.j2
+    dest: /etc/my.cnf.d/openstack.cnf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart_mariadb
+
+# 3. 서비스 시작 및 활성화
+- name: MariaDB 서비스 시작 및 활성화
+  service:
+    name: mariadb
+    state: started
+    enabled: yes
+
+# 4. root 비밀번호 설정 및 보안 강화 (mysql_secure_installation 대체)
+- name: MariaDB root 비밀번호 설정
+  mysql_user:
+    name: root
+    password: "{{ db_root_password }}"
+    host: "{{ item }}"
+    login_user: root
+    login_password: "{{ db_root_password }}" # 이 줄을 추가
+    login_unix_socket: /var/lib/mysql/mysql.sock
+    login_host: "{{ hostvars['controller']['mgmt_ip'] }}"
+    check_implicit_admin: yes               # 비밀번호가 없을 때도 접속 시도 허용
+    state: present
+  with_items:
+    - localhost
+    - "{{ inventory_hostname }}"
+  ignore_errors: yes
+    # 2. 익명 사용자(Anonymous) 제거
+- name: 익명 사용자 제거
+  mysql_user:
+    name: ""
+    host_all: yes
+    state: absent
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    login_unix_socket: /var/lib/mysql/mysql.sock
+    login_host: "{{ hostvars['controller']['mgmt_ip'] }}"
+
+
+# 3. 테스트 데이터베이스 제거
+- name: 테스트 DB 제거
+  mysql_db:
+    name: test
+    state: absent
+    login_user: root
+    login_password: "{{ db_root_password }}"

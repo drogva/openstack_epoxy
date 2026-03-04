@@ -1,0 +1,59 @@
+[DEFAULT]
+enabled_apis = osapi_compute,metadata
+#transport_url = rabbit://openstack:{{ RABBIT_PASS }}@{{ hostvars['controller']['mgmt_ip'] }}:5672/
+transport_url = rabbit://openstack:{{ RABBIT_PASS }}@controller:5672
+state_path = /var/lib/nova 
+
+my_ip = {{ compute_ip }}
+compute_driver = libvirt.LibvirtDriver
+log_dir = /var/log/nova
+lock_path = /var/lib/nova/tmp
+
+[api]
+auth_strategy = keystone
+
+[keystone_authtoken]
+www_authenticate_uri = http://{{ hostvars['controller']['mgmt_ip'] }}:5000/
+auth_url = http://{{ hostvars['controller']['mgmt_ip'] }}:5000/
+memcached_servers = {{ hostvars['controller']['mgmt_ip'] }}:11211
+auth_type = password
+project_domain_name = Default
+user_domain_name = Default
+project_name = service
+username = nova
+password = {{ NOVA_PASS }}
+
+[vnc]
+enabled = true
+server_listen = 0.0.0.0
+server_proxyclient_address = {{ compute_ip }}
+novncproxy_base_url = http://{{ hostvars['controller']['mgmt_ip'] }}:6080/vnc_auto.html
+
+[glance]
+api_servers = http://{{ hostvars['controller']['mgmt_ip'] }}:9292
+
+[placement]
+region_name = RegionOne
+project_domain_name = Default
+project_name = service
+auth_type = password
+user_domain_name = Default
+auth_url = http://{{ hostvars['controller']['mgmt_ip'] }}:5000/v3
+username = placement
+password = {{ PLACEMENT_PASS }}
+
+[libvirt]
+virt_type = {{ nova_virt_type | default('kvm') }}
+
+[neutron]
+auth_url = http://{{ hostvars['controller']['mgmt_ip'] }}:5000
+auth_type = password
+project_domain_name = Default
+user_domain_name = Default
+region_name = RegionOne
+project_name = service
+username = neutron
+password = {{ NEUTRON_PASS }}
+metadata_proxy_shared_secret = {{ METADATA_SECRET }}
+service_metadata_proxy = True
+insecure = false

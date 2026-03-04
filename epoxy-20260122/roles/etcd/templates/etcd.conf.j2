@@ -1,0 +1,13 @@
+#[Member]
+ETCD_DATA_DIR="/var/lib/etcd/default.etcd"
+# 다른 노드들이 접속할 수 있도록 관리 IP를 바인딩합니다.
+ETCD_LISTEN_PEER_URLS="http://{{ controller_ip }}:2380"
+ETCD_LISTEN_CLIENT_URLS="http://{{ controller_ip }}:2379"
+ETCD_NAME="controller"
+
+#[Clustering]
+ETCD_INITIAL_ADVERTISE_PEER_URLS="http://{{ controller_ip }}:2380"
+ETCD_ADVERTISE_CLIENT_URLS="http://{{ controller_ip }}:2379"
+ETCD_INITIAL_CLUSTER="controller=http://{{ controller_ip }}:2380"
+ETCD_INITIAL_CLUSTER_TOKEN="etcd-cluster-01"
+ETCD_INITIAL_CLUSTER_STATE="new"

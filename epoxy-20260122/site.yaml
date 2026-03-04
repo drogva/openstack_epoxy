@@ -1,0 +1,67 @@
+- hosts: openstack
+  become: yes  # sudo 권한 사용
+  roles:
+    - common
+
+# 2. 컨트롤러에만 DB 설치 (다음 단계)
+- hosts: controllers
+  become: yes
+  roles:
+    - mariadb
+    - rabbitmq
+    - memcached
+# 3단계: Keystone (인증 서비스 - 모든 서비스의 기초)
+- hosts: controllers
+  roles:
+    - keystone
+
+# 4단계: Placement & Glance (이미지 및 자원 관리)
+- hosts: controllers
+  roles:
+    - placement
+    - glance
+    - etcd
+
+# 5단계: Nova (컴퓨트 서비스) - 컨트롤러 먼저!
+- hosts: controllers
+  roles:
+    - nova-controller
+
+# 6단계: Nova (컴퓨트 서비스) - 그다음 컴퓨트 노드!
+- hosts: computes
+  roles:
+    - nova-compute
+
+# 7단계: Neutron (네트워크) - 컨트롤러와 컴퓨트 순차 적용
+- hosts: controllers
+  roles:
+    - neutron-controller
+
+- hosts: computes
+  roles:
+    - neutron-compute
+
+- hosts: controllers
+  roles:
+    - neutron-controller
+
+- hosts: controllers
+  roles:
+    - neutron-controller
+
+
+- hosts: controllers
+  become: yes
+  collections:
+    - openstack.cloud
+  roles:
+    - octavia-controller
+
+
+
+
+
+
+
+
+

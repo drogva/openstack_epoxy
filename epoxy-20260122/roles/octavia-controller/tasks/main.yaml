@@ -1,0 +1,353 @@
+- name: 오픈스택 인증 정보 설정
+  set_fact:
+    os_auth:
+      auth_url: "http://{{ controller_ip }}:5000/v3"
+      username: "admin"
+      password: "{{ ADMIN_PASS }}"
+      project_name: "admin"
+      user_domain_name: "Default"
+      project_domain_name: "Default"
+
+- name: Octavia 데이터베이스 생성
+  mysql_db:
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    login_host: "{{ mgmt_ip }}"
+    login_unix_socket: /var/lib/mysql/mysql.sock
+    name: octavia
+    state: present
+ 
+
+- name: Octavia DB 권한 부여
+  mysql_user:
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    login_host: "{{ mgmt_ip }}"
+    login_unix_socket: /var/lib/mysql/mysql.sock
+    name: octavia
+    password: "{{ OCTAVIA_DBPASS }}"
+    priv: "octavia.*:ALL"
+    host: "{{ item }}"
+  with_items: ['localhost', '%']
+
+
+# 2. Keystone 유저 및 롤 생성
+- name: Octavia 서비스 유저 생성
+  openstack.cloud.identity_user:
+    auth:
+      auth_url: "http://{{ controller_ip }}:5000/v3"
+      username: "admin"
+      password: "{{ ADMIN_PASS }}"
+      project_name: "admin"
+      user_domain_name: "Default"
+      project_domain_name: "Default"
+    name: octavia
+    password: "{{ OCTAVIA_PASS }}"
+    default_project: service
+    state: present
+
+- name: Octavia 유저에게 admin 롤 부여
+  openstack.cloud.role_assignment:
+    auth:
+      auth_url: "http://{{ controller_ip }}:5000/v3"
+      username: "admin"
+      password: "{{ ADMIN_PASS }}"
+      project_name: "admin"
+      user_domain_name: "Default"
+      project_domain_name: "Default"
+    user: octavia
+    role: admin
+    project: service
+    state: present
+
+- name: Octavia 서비스 엔티티 생성
+  openstack.cloud.catalog_service:
+    auth:
+      auth_url: "http://{{ controller_ip }}:5000/v3"
+      username: "admin"
+      password: "{{ ADMIN_PASS }}"
+      project_name: "admin"
+      user_domain_name: "Default"
+      project_domain_name: "Default"
+    name: octavia
+    type: load-balancer
+    description: "OpenStack Load Balancing Service"
+    state: present
+
+- name: Octavia 서비스 엔드포인트 생성
+  openstack.cloud.endpoint:  # 또는 catalog_endpoint (컬렉션 버전에 따라 다름)
+    auth:
+      auth_url: "http://{{ controller_ip }}:5000/v3"
+      username: "admin"
+      password: "{{ ADMIN_PASS }}"
+      project_name: "admin"
+      user_domain_name: "Default"
+      project_domain_name: "Default"
+    service: octavia
+    endpoint_interface: "{{ item }}"
+    url: "http://{{ controller_ip }}:9876"
+    region: RegionOne
+    state: present
+  with_items:
+    - public
+    - internal
+    - admin
+
+
+- name: Octavia 패키지 설치
+  dnf:
+    name:
+      - openstack-octavia-api
+      - openstack-octavia-health-manager
+      - openstack-octavia-housekeeping
+      - openstack-octavia-worker
+      - git
+    enablerepo: "centos-openstack-epoxy,epel,crb"
+    state: present
+
+- name: Octavia 인증서 저장 디렉토리 생성
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: octavia
+    group: octavia
+    mode: '0755'
+  with_items:
+    - /etc/octavia/certs
+    - /etc/octavia/certs/private
+
+- name: 인증서 생성을 위한 Octavia 소스 클론 (임시 디렉토리)
+  git:
+    repo: 'https://opendev.org/openstack/octavia.git'
+    dest: /root/octavia_git
+    version: master
+
+- name: Octavia 듀얼 중간 CA 인증서 생성 스크립트 실행
+  command: ./create_dual_intermediate_CA.sh
+  args:
+    chdir: /root/octavia_git/bin
+    creates: /root/octavia_git/bin/dual_ca/etc/octavia/certs/server_ca.cert.pem
+
+- name: 생성된 인증서들을 /etc/octavia/certs로 복사
+  shell: |
+    cp -p /root/octavia_git/bin/dual_ca/etc/octavia/certs/server_ca.cert.pem /etc/octavia/certs/
+    cp -p /root/octavia_git/bin/dual_ca/etc/octavia/certs/server_ca-chain.cert.pem /etc/octavia/certs/
+    cp -p /root/octavia_git/bin/dual_ca/etc/octavia/certs/server_ca.key.pem /etc/octavia/certs/private/
+    cp -p /root/octavia_git/bin/dual_ca/etc/octavia/certs/client_ca.cert.pem /etc/octavia/certs/
+    cp -p /root/octavia_git/bin/dual_ca/etc/octavia/certs/client.cert-and-key.pem /etc/octavia/certs/private/
+    chown -R octavia:octavia /etc/octavia/certs
+
+- name: Octavia 보안 그룹 및 룰 생성
+  openstack.cloud.security_group:
+    auth:
+      auth_url: "http://{{ controller_ip }}:5000/v3"
+      username: "admin"
+      password: "{{ ADMIN_PASS }}"      # <--- all.yaml에 정의된 변수
+      project_name: "admin"
+      user_domain_name: "Default"
+      project_domain_name: "Default"
+    name: lb-mgmt-sec-group
+    description: "Octavia Amphora 관리용 보안 그룹"
+    state: present
+  register: lb_secgroup
+
+- name: 보안 그룹 ID 추출 및 고정
+  set_fact:
+    lb_secgroup_id: "{{ lb_secgroup.id if lb_secgroup.id is defined else lb_secgroup.security_group.id }}"
+
+
+
+# 인프라 자원 생성 부분
+- name: Public 네트워크(Flat) 생성
+  openstack.cloud.network:
+    auth:
+      auth_url: "http://{{ controller_ip }}:5000/v3"
+      username: "admin"
+      password: "{{ ADMIN_PASS }}"
+      project_name: "admin"
+      user_domain_name: "Default"
+      project_domain_name: "Default"
+    name: public
+    external: true
+    shared: true
+    provider_network_type: flat
+    provider_physical_network: physnet1
+    state: present
+
+- name: Public 서브넷 생성 (172.30.1.0/24)
+  openstack.cloud.subnet:
+    auth:
+      auth_url: "http://{{ controller_ip }}:5000/v3"
+      username: "admin"
+      password: "{{ ADMIN_PASS }}"
+      project_name: "admin"
+      user_domain_name: "Default"
+      project_domain_name: "Default"
+    name: public-subnet
+    network_name: public
+    cidr: 172.30.1.0/24
+    gateway_ip: 172.30.1.254       # 말씀하신 gateway4 주소
+    dns_nameservers: [8.8.8.8]
+    allocation_pool_start: 172.30.1.200 # 외부망과 겹치지 않는 범위 선택
+    allocation_pool_end: 172.30.1.250
+    enable_dhcp: false # 외부망은 보통 DHCP를 끕니다
+    state: present
+
+- name: 공식 Amphora 이미지 다운로드 (Epoxy 버전)
+  get_url:
+    url: "https://nbg1.your-objectstorage.com/osism/openstack-octavia-amphora-image/octavia-amphora-haproxy-2025.1.qcow2"
+    dest: "/root/amphora-haproxy-epoxy.qcow2"
+
+
+
+# 2. 이미지 생성 (컨트롤러에서 실행)
+# 1. Epoxy용 Amphora 이미지 다운로드
+- name: 공식 Amphora 이미지 다운로드 (Epoxy 버전)
+  get_url:
+    url: "https://nbg1.your-objectstorage.com/osism/openstack-octavia-amphora-image/octavia-amphora-haproxy-2025.1.qcow2"
+    dest: "/root/amphora-haproxy-epoxy.qcow2"
+ 
+
+- name: Amphora 이미지를 RAW 포맷으로 변환
+  shell: |
+    qemu-img convert -f qcow2 -O raw /root/amphora-haproxy-epoxy.qcow2 /root/amphora-haproxy-epoxy.img
+  args:
+    creates: /root/amphora-haproxy-epoxy.img
+ 
+
+# 2. 변환된 RAW 이미지 Glance에 등록
+- name: Glance에 Amphora 이미지 등록 (RAW 포맷 및 속성 강화)
+  openstack.cloud.image:
+    auth:
+      auth_url: "http://{{ controller_ip }}:5000/v3"
+      username: "admin"
+      password: "{{ ADMIN_PASS }}"
+      project_name: "admin"
+      user_domain_name: "Default"
+      project_domain_name: "Default"
+    name: "amphora-x64-haproxy"
+    container_format: bare
+    disk_format: raw  # <--- raw로 변경
+    state: present
+    filename: "/root/amphora-haproxy-epoxy.img"
+    min_disk: 2
+    min_ram: 1024
+    properties:
+      hw_disk_bus: "scsi"
+      hw_scsi_model: "virtio-scsi"
+      os_distro: "ubuntu"
+      os_version: "22.04"
+      hw_video_model: "vga" # <--- 아까 에러난 virtio 비디오 대신 vga 강제 지정
+    tags: ["amphora"]
+ 
+
+- name: Octavia 전용 Flavor 생성
+  openstack.cloud.compute_flavor:
+    auth: "{{ os_auth }}"
+    name: m1.octavia
+    flavorid: "100"
+    ram: 4096
+    vcpus: 2
+    disk: 2
+    is_public: yes  # 아까 Is Public: False였던 문제를 해결합니다.
+    state: present
+
+- name: 보안 그룹 룰 추가 (관리 및 서비스 포트)
+  openstack.cloud.security_group_rule:
+    auth: "{{ os_auth }}"
+    security_group: lb-mgmt-sec-group
+    protocol: "{{ item.proto }}"
+    port_range_min: "{{ item.port | default(omit) }}"
+    port_range_max: "{{ item.port | default(omit) }}"
+    direction: ingress
+    remote_ip_prefix: 0.0.0.0/0
+  loop:
+    - { proto: 'icmp', port: -1 }
+    - { proto: 'tcp', port: 22 }
+    - { proto: 'tcp', port: 80 }
+    - { proto: 'tcp', port: 443 }
+    - { proto: 'tcp', port: 9443 }
+    - { proto: 'tcp', port: 5555 }  
+
+- name: (보안그룹) lb-mgmt-sec-group RBAC 공유 설정
+  shell: |
+    openstack network rbac create --target-all-projects \
+    --action access_as_shared --type security_group {{ lb_secgroup_id }}
+  environment:
+    OS_AUTH_URL: "http://{{ controller_ip }}:5000/v3"
+    OS_USERNAME: "admin"
+    OS_PASSWORD: "{{ ADMIN_PASS }}"
+    OS_PROJECT_NAME: "admin"
+    OS_USER_DOMAIN_NAME: "Default"
+    OS_PROJECT_DOMAIN_NAME: "Default"
+    OS_IDENTITY_API_VERSION: "3"
+  register: rbac_result
+  failed_when:
+    - rbac_result.rc != 0
+    - "'already exists' not in rbac_result.stderr"
+    - "'Conflict' not in rbac_result.stderr"
+  changed_when: rbac_result.rc == 0
+
+
+
+
+# 기존 mgmt_net 대신 public_net 정보를 가져오는 로직이 필요합니다.
+- name: Public 네트워크 정보 조회
+  openstack.cloud.networks_info:
+    auth: "{{ os_auth }}"
+    name: "public"
+  register: public_net_info  # 변수명 확인
+  
+
+- name: Public 네트워크 ID 변수 설정
+  set_fact:
+    # 여기서 public_net_id 라는 이름으로 정의해야 템플릿이 인식합니다.
+    public_net_id: "{{ public_net_info.networks[0].id }}"
+
+- name: Octavia 설정 변경 (octavia.conf)
+  ini_file:
+    path: /etc/octavia/octavia.conf
+    section: controller_worker
+    option: amp_boot_network_list
+    value: "{{ public_net_info.networks[0].id }}"
+  notify: restart octavia services
+
+- name: Octavia 관리망 설정 (Public 겸용)
+  ini_file:
+    path: /etc/octavia/octavia.conf
+    section: "{{ item.section }}"
+    option: "{{ item.option }}"
+    value: "{{ item.value }}"
+  with_items:
+    # 1. Amphora가 부팅될 때 사용할 Public 네트워크 ID
+    - { section: 'controller_worker', option: 'amp_boot_network_list', value: "{{ public_net_info.networks[0].id }}" }
+    # 2. 하트비트 통신을 위한 관리망 이름
+    - { section: 'controller_worker', option: 'amp_mgmt_net_name', value: 'public' }
+    # 3. 보안 그룹 (관리 포트 9443 허용)
+    - { section: 'controller_worker', option: 'amp_secgroup_list', value: "{{ lb_secgroup_id }}" }
+  notify: restart octavia services
+
+- name: octavia.conf 템플릿 배포
+  template:
+    src: octavia.conf.j2
+    dest: /etc/octavia/octavia.conf
+    owner: root
+    group: octavia
+    mode: '0640'
+
+
+- name: Octavia DB Sync
+  command: octavia-db-manage --config-file /etc/octavia/octavia.conf upgrade head
+  become: yes
+  become_user: octavia
+
+- name: Octavia 서비스 시작 및 활성화
+  service:
+    name: "{{ item }}"
+    state: restarted
+    enabled: yes
+  with_items:
+    - octavia-api
+    - octavia-health-manager
+    - octavia-housekeeping
+    - octavia-worker

@@ -1,0 +1,16 @@
+[DEFAULT]
+# 컨트롤러의 Nova API를 바라봄
+nova_metadata_host = {{ hostvars['controller']['mgmt_ip'] }}
+nova_metadata_protocol = http
+# 공유 비밀키 (Nova 설정과 동일해야 함)
+metadata_proxy_shared_secret = {{ METADATA_SECRET }}
+
+[agent]
+root_helper = sudo neutron-rootwrap /etc/neutron/rootwrap.conf
+
+[ovs]
+ovsdb_connection = tcp:127.0.0.1:6640
+
+[ovn]
+# 컨트롤러의 OVN SB DB 포트 6642 바라봄
+ovn_sb_connection = tcp:{{ hostvars['controller']['mgmt_ip'] }}:6642

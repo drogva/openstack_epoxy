@@ -1,0 +1,113 @@
+---
+# 1. Keystone 데이터베이스 생성 및 권한 부여
+# 1. Keystone 데이터베이스 생성 및 권한 부여
+- name: Keystone 데이터베이스 생성
+  mysql_db:
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    login_host: "{{ mgmt_ip }}"
+    login_unix_socket: /var/lib/mysql/mysql.sock
+    name: keystone
+    state: present
+
+- name: Keystone DB 사용자 권한 부여
+  mysql_user:
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    login_host: "{{ mgmt_ip }}"
+    name: keystone
+    password: "{{ keystone_dbpassword }}"
+    login_unix_socket: /var/lib/mysql/mysql.sock
+    priv: "keystone.*:ALL"
+    host: "{{ item }}"
+    state: present
+  with_items:
+    - "localhost"
+    - "%"
+
+# 2. 패키지 설치
+- name: Keystone 및 Apache 패키지 설치
+  dnf:
+    name:
+      - openstack-keystone
+      - httpd
+      - python3-mod_wsgi
+    state: present
+
+# 3. keystone.conf 설정 (ini_file 모듈 활용)
+- name: keystone.conf 데이터베이스 연결 설정
+  ini_file:
+    path: /etc/keystone/keystone.conf
+    section: database
+    option: connection
+    value: "mysql+pymysql://keystone:{{ keystone_dbpassword }}@{{ controller_host }}/keystone"
+
+- name: keystone.conf 토큰 프로바이더 설정
+  ini_file:
+    path: /etc/keystone/keystone.conf
+    section: token
+    option: provider
+    value: fernet
+
+# 4. DB Sync 및 Fernet 키 초기화
+- name: Keystone DB Sync 실행
+  become_user: keystone
+  command: keystone-manage db_sync
+  changed_when: false
+
+- name: Fernet 및 Credential 초기화
+  command: "{{ item }}"
+  with_items:
+    - "keystone-manage fernet_setup --keystone-user keystone --keystone-group keystone"
+    - "keystone-manage credential_setup --keystone-user keystone --keystone-group keystone"
+  changed_when: false
+
+# 5. Keystone 부트스트랩 (관리자 계정 및 엔드포인트 생성)
+- name: Keystone 서비스 부트스트랩
+  command: >
+    keystone-manage bootstrap --bootstrap-password {{ keystone_admin_password }}
+    --bootstrap-admin-url http://{{ controller_host }}:5000/v3/
+    --bootstrap-internal-url http://{{ controller_host }}:5000/v3/
+    --bootstrap-public-url http://{{ controller_host }}:5000/v3/
+    --bootstrap-region-id RegionOne
+  changed_when: false
+
+# 6. Apache 설정 (ServerName 및 링크 생성)
+- name: Apache ServerName 설정
+  lineinfile:
+    path: /etc/httpd/conf/httpd.conf
+    regexp: '^#?ServerName'
+    line: "ServerName {{ controller_host }}"
+
+- name: Keystone WSGI 설정 링크 생성
+  file:
+    src: /usr/share/keystone/wsgi-keystone.conf
+    dest: /etc/httpd/conf.d/wsgi-keystone.conf
+    state: link
+
+# 7. Apache 서비스 시작
+- name: Apache 서비스 시작 및 활성화
+  service:
+    name: httpd
+    state: started
+    enabled: yes
+
+- name: admin-openrc 파일 생성
+  template:
+    src: admin-openrc.j2
+    dest: /root/admin-openrc
+    mode: '0600'
+
+- name: 서비스 프로젝트 생성
+  openstack.cloud.project:
+    auth:
+      auth_url: "http://{{ controller_host }}:5000/v3"
+      username: "admin"
+      password: "{{ keystone_admin_password }}"
+      project_name: "admin"
+      user_domain_name: "Default"
+      project_domain_name: "Default"
+    name: service
+    domain: default
+    description: "Service Project"
+    state: present

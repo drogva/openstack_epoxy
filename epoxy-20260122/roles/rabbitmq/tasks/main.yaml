@@ -1,0 +1,42 @@
+---
+- name: RabbitMQ 패키지 설치 (EPEL 제외하고 Epoxy 우선 설치)
+  dnf:
+    name: rabbitmq-server
+    state: present
+    disablerepo: "epel"  # EPEL과 충돌 방지
+    enablerepo: "centos-openstack-epoxy,centos-messaging-rabbitmq-313"
+
+- name: RabbitMQ 서비스 중지
+  service:
+    name: rabbitmq-server
+    state: stopped
+
+- name: 꼬여있는 RabbitMQ 내부 데이터Mnesia 삭제
+  shell: rm -rf /var/lib/rabbitmq/mnesia/*
+
+- name: RabbitMQ 서버 설치
+  dnf:
+    name: rabbitmq-server
+    state: present
+
+- name: RabbitMQ 서비스 시작 및 활성화
+  service:
+    name: rabbitmq-server
+    state: started
+    enabled: yes
+
+- name: OpenStack 전용 RabbitMQ 사용자 생성
+  rabbitmq_user:
+    user: openstack
+    password: "{{ rabbit_password }}"
+    state: present
+
+- name: OpenStack 사용자 권한 설정
+  rabbitmq_user:
+    user: openstack
+    permissions:
+      - vhost: "/"
+        configure_priv: ".*"
+        read_priv: ".*"
+        write_priv: ".*"
+    state: present

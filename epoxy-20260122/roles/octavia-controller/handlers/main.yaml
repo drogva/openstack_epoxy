@@ -1,0 +1,9 @@
+- name: restart octavia services
+  service:
+    name: "{{ item }}"
+    state: restarted
+  loop:
+    - octavia-api
+    - octavia-health-manager
+    - octavia-housekeeping
+    - octavia-worker

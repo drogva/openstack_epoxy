@@ -1,0 +1,55 @@
+---
+- name: 고장난 레포지토리 파일 및 캐시 완전 박멸
+  shell: |
+    # 1. 문제의 파일 확실히 제거
+    rm -f /etc/yum.repos.d/rabbitmq.repo
+    rm -f /etc/yum.repos.d/CentOS-Messaging-rabbitmq.repo
+
+    # 2. DNF 내부 DB 및 캐시 디렉토리 물리적 삭제 (이게 핵심)
+    rm -rf /var/cache/dnf/*
+
+    # 3. DNF DB 재구축
+    dnf clean all
+  changed_when: true
+
+- name: DNF 플러그인 코어 설치
+  dnf:
+    name: dnf-plugins-core
+    state: present
+
+- name: CRB 리포지토리 활성화
+  shell: dnf config-manager --set-enabled crb
+  changed_when: false
+
+- name: EPEL 저장소 설치 및 우선순위 조정
+  block:
+    - dnf:
+        name: epel-release
+        state: present
+    - ini_file:
+        path: /etc/yum.repos.d/epel.repo
+        section: epel
+        option: priority
+        value: "99"
+
+- name: OpenStack Epoxy 릴리즈 저장소 설치
+  dnf:
+    name: centos-release-openstack-epoxy
+    state: present
+
+# 2. 사용자께서 주신 RabbitMQ 4.2.2 RPM 직접 설치
+- name: RabbitMQ Server 4.2.2 직접 설치
+  dnf:
+    name: "https://github.com/rabbitmq/rabbitmq-server/releases/download/v4.2.2/rabbitmq-server-4.2.2-1.el8.noarch.rpm"
+    state: present
+    disable_gpg_check: yes
+
+
+
+- name: 기존 낡은 RabbitMQ 저장소 비활성화 (충돌 방지)
+  ini_file:
+    path: /etc/yum.repos.d/CentOS-Messaging-rabbitmq.repo
+    section: centos-rabbitmq-38
+    option: enabled
+    value: "0"
+  ignore_errors: yes  # 파일이 없을 수도 있으니 무시 옵션

@@ -1,0 +1,24 @@
+---
+# 1. 모든 패키지 업그레이드
+- name: 모든 노드의 패키지를 최신 버전으로 업그레이드 (dnf upgrade)
+  dnf:
+    name: "*"
+    state: latest
+    # 아래 한 줄을 추가해서 앤시블 충돌을 피합니다.
+
+# 2. 커널 업데이트 등이 포함되었을 수 있으므로 재부팅 수행
+- name: 시스템 업그레이드 후 재부팅 실행
+  reboot:
+    reboot_timeout: 600  # 서버가 다시 올라올 때까지 최대 10분 대기
+    connect_timeout: 5
+    pre_reboot_delay: 0
+    post_reboot_delay: 30 # 부팅 후 서비스 안정화를 위해 30초 더 대기
+    msg: "Ansible이 시스템 업그레이드 후 재부팅을 시도합니다."
+
+# 3. 재부팅 완료 후 필수 도구 설치
+- name: 오픈스택 클라이언트 및 필수 도구 설치
+  dnf:
+    name:
+      - python3-openstackclient
+      - openstack-selinux
+    state: present

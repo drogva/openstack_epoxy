@@ -1,0 +1,20 @@
+---
+- name: etcd 패키지 설치 (dnf)
+  dnf:
+    name: etcd
+    state: present
+
+- name: etcd 설정 파일 적용 (/etc/etcd/etcd.conf)
+  template:
+    src: etcd.conf.j2
+    dest: /etc/etcd/etcd.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart etcd
+
+- name: etcd 서비스 활성화 및 시작
+  systemd:
+    name: etcd
+    state: started
+    enabled: yes

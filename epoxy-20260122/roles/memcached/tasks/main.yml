@@ -1,0 +1,27 @@
+---
+# 1. Memcached 패키지 설치
+# 가이드: dnf install memcached python3-memcached
+- name: Memcached 및 파이썬 라이브러리 설치
+  dnf:
+    name:
+      - memcached
+      - python3-memcached
+    state: present
+
+# 2. /etc/sysconfig/memcached 설정 수정
+# 가이드: OPTIONS="-l 127.0.0.1,::1,controller"
+# 여기서 'controller' 대신 관리 IP인 {{ mgmt_ip }}를 사용합니다.
+- name: Memcached 관리 네트워크 바인딩 설정
+  lineinfile:
+    path: /etc/sysconfig/memcached
+    regexp: '^OPTIONS='
+    line: 'OPTIONS="-l 127.0.0.1,::1,{{ controller_ip }}"'
+  notify: restart_memcached
+
+# 3. 서비스 시작 및 활성화
+# 가이드: systemctl enable/start memcached.service
+- name: Memcached 서비스 시작 및 활성화
+  service:
+    name: memcached
+    state: started
+    enabled: yes

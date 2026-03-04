@@ -1,0 +1,140 @@
+# 1. 3개의 데이터베이스 생성 (nova_api, nova, nova_cell0)
+- name: Nova 관련 데이터베이스 생성
+  mysql_db:
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    login_host: "{{ mgmt_ip }}"
+    login_unix_socket: /var/lib/mysql/mysql.sock
+    name: "{{ item }}"
+    state: present
+  with_items: ['nova_api', 'nova', 'nova_cell0']
+
+- name: Nova 데이터베이스 권한 부여
+  mysql_user:
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    login_host: "{{ mgmt_ip }}"
+    login_unix_socket: /var/lib/mysql/mysql.sock
+    name: nova
+    password: "{{ NOVA_DBPASS }}"
+    append_privs: yes  # 기존 권한에 추가 (중요)
+    # nested_item[0]은 DB 이름, nested_item[1]은 접속 호스트(localhost/%)가 됩니다.
+    host: "{{ item[1] }}"
+    priv: "{{ item[0] }}.*:ALL"
+    state: present
+  with_nested:
+    - ['nova_api', 'nova', 'nova_cell0']
+    - ['localhost', '%']
+
+# 2. 계정 및 엔드포인트 설정 (Keystone)
+
+
+# 2. 계정 및 엔드포인트 설정 (Keystone)
+- name: Nova 사용자 및 역할 생성
+  openstack.cloud.identity_user:
+    auth:
+      auth_url: "http://{{ controller_host }}:5000/v3"
+      username: "admin"
+      password: "{{ keystone_admin_password }}"
+      project_name: "admin"
+      user_domain_name: "Default"
+      project_domain_name: "Default"
+    name: nova
+    password: "{{ NOVA_PASS }}"
+    domain: default
+    state: present
+
+- name: Nova 역할 추가
+  openstack.cloud.role_assignment:
+    auth:
+      auth_url: "http://{{ controller_host }}:5000/v3"
+      username: "admin"
+      password: "{{ keystone_admin_password }}"
+      project_name: "admin"
+      user_domain_name: "Default"
+      project_domain_name: "Default"
+    user: nova
+    role: admin
+    project: service
+    state: present
+
+- name: Nova 서비스 생성
+  openstack.cloud.catalog_service:
+    auth:
+      auth_url: "http://{{ controller_host }}:5000/v3"
+      username: "admin"
+      password: "{{ keystone_admin_password }}"
+      project_name: "admin"
+      user_domain_name: "Default"
+      project_domain_name: "Default"
+    name: nova
+    type: compute
+    description: "OpenStack Compute"
+    state: present
+
+- name: Nova 엔드포인트 생성
+  openstack.cloud.endpoint:
+    auth:
+      auth_url: "http://{{ controller_host }}:5000/v3"
+      username: "admin"
+      password: "{{ keystone_admin_password }}"
+      project_name: "admin"
+      user_domain_name: "Default"
+      project_domain_name: "Default"
+    service: nova
+    endpoint_interface: "{{ item }}"
+    url: "http://{{ controller_host }}:8774/v2.1"
+    region: RegionOne
+    state: present
+  with_items: ['public', 'internal', 'admin']
+# 3. 패키지 설치 및 설정
+- name: Nova 컨트롤러 패키지 설치
+  dnf:
+    name:
+      - openstack-nova-api
+      - openstack-nova-conductor
+      - openstack-nova-novncproxy
+      - openstack-nova-scheduler
+    state: present
+
+- name: nova.conf 설정 적용
+  template:
+    src: nova.conf.j2
+    dest: /etc/nova/nova.conf
+    owner: nova
+    group: nova
+    mode: '0640'
+
+# 4. 가이드에 명시된 4단계 DB Sync 및 Cell 등록
+- name: Nova API DB Sync
+  become_user: nova
+  command: nova-manage api_db sync
+
+- name: Cell0 등록
+  become_user: nova
+  command: nova-manage cell_v2 map_cell0
+
+- name: Cell1 생성
+  command: nova-manage cell_v2 create_cell --name=cell1 --verbose
+  register: cell1_result
+  # 이미 존재한다는 메시지가 있으면 실패로 간주하지 않음
+  failed_when:
+    - cell1_result.rc != 0
+    - "'already exists' not in cell1_result.stdout"
+  changed_when: cell1_result.rc == 0
+
+- name: Nova DB Sync
+  become_user: nova
+  command: nova-manage db sync
+
+# 5. 서비스 시작
+- name: Nova 컨트롤러 서비스 시작
+  service:
+    name: "{{ item }}"
+    state: started
+    enabled: yes
+  with_items:
+    - openstack-nova-api.service
+    - openstack-nova-scheduler.service
+    - openstack-nova-conductor.service
+    - openstack-nova-novncproxy.service

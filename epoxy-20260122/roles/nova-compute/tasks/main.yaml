@@ -1,0 +1,69 @@
+
+# 1. 패키지 설치
+- name: Nova Compute 및 관련 패키지 설치
+  dnf:
+    name:
+      - openstack-nova-compute
+      - libvirt
+    state: present
+
+# 2. 하드웨어 가속(KVM) 지원 여부 확인
+- name: 가상화 지원 여부 체크
+  shell: egrep -c '(vmx|svm)' /proc/cpuinfo
+  register: virtualization_support
+  failed_when: false
+  changed_when: false
+
+# 3. nova.conf 설정 (컨트롤러와 공유하거나 별도 생성)
+- name: nova.conf 설정 적용
+  template:
+    src: nova.conf.j2
+    dest: /etc/nova/nova.conf
+    owner: nova
+    group: nova
+    mode: '0640'
+
+# 4. 가상화 타입 설정 (KVM vs QEMU)
+- name: libvirt virt_type 설정
+  ini_file:
+    path: /etc/nova/nova.conf
+    section: libvirt
+    option: virt_type
+    value: "{{ 'kvm' if virtualization_support.stdout|int >= 1 else 'qemu' }}"
+
+# 5. 서비스 시작
+- name: Nova Compute 에러 상태 초기화 (강제)
+  command: systemctl reset-failed openstack-nova-compute
+  ignore_errors: yes  # 에러가 없더라도 무시하고 진행
+
+- name: libvirtd 및 nova-compute 시작 및 재시작
+  service:
+    name: "{{ item }}"
+    state: restarted  # started 대신 restarted를 쓰면 더 확실합니다
+    enabled: yes
+  with_items:
+    - libvirtd.service
+    - openstack-nova-compute.service
+
+
+- name: Nova 로그 디렉토리 권한 수정 (컨트롤러)
+  file:
+    path: /var/log/nova
+    owner: nova
+    group: nova
+    state: directory
+    recurse: yes  # 하위 파일들까지 모두 nova 소유로 변경
+  delegate_to: controller
+
+- name: Nova Compute 서비스 시작 후 안정화 대기
+  pause:
+    seconds: 5
+
+- name: 새로운 컴퓨트 노드 검색 (컨트롤러에서 실행)
+  command: su -s /bin/sh -c "nova-manage cell_v2 discover_hosts --verbose" nova
+  delegate_to: controller
+  run_once: true
+  become: yes
+
+
+

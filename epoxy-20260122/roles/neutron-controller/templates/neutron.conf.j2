@@ -1,0 +1,44 @@
+[DEFAULT]
+bind_host = 0.0.0.0 
+bind_port = 9696
+core_plugin = ml2
+service_plugins = ovn-router,trunk
+auth_strategy = keystone
+state_path = /var/lib/neutron
+allow_overlapping_ips = True
+notify_nova_on_port_status_changes = True
+notify_nova_on_port_data_changes = True
+
+# RabbitMQ 연결 정보
+transport_url = rabbit://openstack:{{ rabbit_password }}@{{ hostvars['controller']['mgmt_ip'] }}:5672/
+
+[keystone_authtoken]
+www_authenticate_uri = http://{{ hostvars['controller']['mgmt_ip'] }}:5000
+auth_url = http://{{ hostvars['controller']['mgmt_ip'] }}:5000
+memcached_servers = {{ hostvars['controller']['mgmt_ip'] }}:11211
+auth_type = password
+project_domain_name = Default
+user_domain_name = Default
+project_name = service
+username = neutron
+password = {{ NEUTRON_PASS }}
+
+[database]
+# 가이드: neutron_ml2 데이터베이스를 사용하라고 되어 있네요.
+connection = mysql+pymysql://neutron:{{ NEUTRON_DBPASS }}@{{ hostvars['controller']['mgmt_ip'] }}/neutron
+
+[nova]
+auth_url = http://{{ hostvars['controller']['mgmt_ip'] }}:5000
+auth_type = password
+project_domain_name = Default
+user_domain_name = Default
+region_name = RegionOne
+project_name = service
+username = nova
+password = {{ NOVA_PASS }}
+
+[oslo_concurrency]
+lock_path = $state_path/tmp
+
+[oslo_policy]
+enforce_new_defaults = true

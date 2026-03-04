@@ -1,0 +1,9 @@
+[mysqld]
+# 관리 네트워크 IP (인벤토리의 mgmt_ip 변수 활용)
+bind-address = {{ mgmt_ip }}
+
+default-storage-engine = innodb
+innodb_file_per_table = on
+max_connections = 4096
+collation-server = utf8_general_ci
+character-set-server = utf8

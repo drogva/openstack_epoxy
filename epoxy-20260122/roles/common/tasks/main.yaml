@@ -1,0 +1,48 @@
+---
+# 1. SELinux 비활성화
+- name: SELinux 설정 비활성화 (Permissive/Disabled)
+  selinux:
+    policy: targeted
+    state: disabled
+
+# [추가] Firewalld 비활성화
+- name: Firewalld 서비스 중지 및 비활성화
+  systemd:
+    name: firewalld
+    state: stopped
+    enabled: no
+  ignore_errors: yes  # 혹시 firewalld가 이미 설치 안 되어 있어도 에러 없이 통과
+# 2. [중요] 리포지토리 설정 (여기서 깨진 파일을 지우고 청소합니다)
+- name: 리포지토리 설정 및 청소
+  import_tasks: setup_repos.yml
+
+# 3. /etc/hosts 설정
+- name: /etc/hosts 파일에 노드 정보 등록
+  blockinfile:
+    path: /etc/hosts
+    block: |
+      {{ controller_ip }}       controller
+      {{ compute_ip }}         compute1
+    state: present
+# 4. Chrony 패키지 설치 (이제 레포지토리가 깨끗해져서 성공합니다)
+- name: Chrony 패키지 설치
+  dnf:
+    name: chrony
+    state: present
+
+# 5. Chrony 설정 배포 (Jinja2 템플릿 사용)
+- name: 노드 역할에 맞는 chrony.conf 배포
+  template:
+    src: chrony.conf.j2
+    dest: /etc/chrony.conf
+  notify: restart_chrony
+
+# 6. Chrony 서비스 활성화 및 시작
+- name: Chrony 서비스 시작 및 활성화
+  service:
+    name: chronyd
+    state: started
+    enabled: yes
+
+# 7. 시스템 업데이트 및 클라이언트 설치
+- import_tasks: setup_system.yml

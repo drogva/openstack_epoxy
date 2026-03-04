@@ -1,0 +1,169 @@
+# 1. DB 및 계정 생성 (기존 패턴과 동일)
+- name: Neutron 데이터베이스 생성
+  mysql_db:
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    login_host: "{{ mgmt_ip }}"
+    login_unix_socket: /var/lib/mysql/mysql.sock
+    name: neutron
+    state: present
+
+- name: Neutron DB 권한 부여
+  mysql_user:
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    login_host: "{{ mgmt_ip }}"
+    login_unix_socket: /var/lib/mysql/mysql.sock
+    name: neutron
+    password: "{{ NEUTRON_DBPASS }}"
+    priv: "neutron.*:ALL"
+    host: "{{ item }}"
+  with_items: ['localhost', '%']
+
+# 2-0. Keystone 유저/롤/서비스/엔드포인트 (Neutron)
+- name: Neutron 서비스 유저 생성
+  openstack.cloud.identity_user:
+    auth:
+      auth_url: "http://{{ hostvars['controller']['mgmt_ip'] }}:5000/v3"
+      username: "admin"
+      password: "{{ keystone_admin_password }}"
+      project_name: "admin"
+      user_domain_name: "Default"
+      project_domain_name: "Default"
+    name: neutron
+    password: "{{ NEUTRON_PASS }}"
+    domain: default
+    default_project: service
+    state: present
+
+- name: Neutron 유저에게 admin 롤 부여
+  openstack.cloud.role_assignment: # identity_role 대신 role_assignment 추천
+    auth:
+      auth_url: "http://{{ hostvars['controller']['mgmt_ip'] }}:5000/v3"
+      username: "admin"
+      password: "{{ keystone_admin_password }}"
+      project_name: "admin"
+      user_domain_name: "Default"
+      project_domain_name: "Default"
+    user: neutron
+    role: admin
+    project: service
+    state: present
+
+- name: Neutron 서비스 엔티티 생성
+  openstack.cloud.catalog_service:
+    auth:
+      auth_url: "http://{{ hostvars['controller']['mgmt_ip'] }}:5000/v3"
+      username: "admin"
+      password: "{{ keystone_admin_password }}"
+      project_name: "admin"
+      user_domain_name: "Default"
+      project_domain_name: "Default"
+    name: neutron
+    type: network  # service_type 대신 type 사용 (모듈 버전에 따라 확인 필요)
+    description: "OpenStack Networking"
+    state: present
+
+- name: Neutron 엔드포인트 생성
+  openstack.cloud.endpoint:
+    auth:
+      auth_url: "http://{{ hostvars['controller']['mgmt_ip'] }}:5000/v3"
+      username: "admin"
+      password: "{{ keystone_admin_password }}"
+      project_name: "admin"
+      user_domain_name: "Default"
+      project_domain_name: "Default"
+    service: neutron
+    endpoint_interface: "{{ item }}"
+    url: "http://{{ hostvars['controller']['mgmt_ip'] }}:9696"
+    region: RegionOne
+    state: present
+  loop: ['public', 'internal', 'admin']
+# 2. 패키지 설치 (가이드에 명시된 Epoxy 전용 패키지들)
+- name: Neutron 및 OVN 패키지 설치
+  dnf:
+    name:
+      - openstack-neutron
+      - openstack-neutron-ml2
+      - ovn24.09-central
+      - nginx
+      - python3-memcached
+    state: present
+
+# 3. 설정 파일 배포
+- name: neutron.conf 배포
+  template:
+    src: neutron.conf.j2
+    dest: /etc/neutron/neutron.conf
+    owner: neutron
+    group: neutron
+    mode: '0640'
+
+- name: ml2_conf.ini 배포
+  template:
+    src: ml2_conf.ini.j2
+    dest: /etc/neutron/plugins/ml2/ml2_conf.ini
+
+# 4. 심볼릭 링크 생성 (Neutron은 이걸 해줘야 ml2를 인식합니다)
+- name: ml2_conf.ini 심볼릭 링크
+  file:
+    src: /etc/neutron/plugins/ml2/ml2_conf.ini
+    dest: /etc/neutron/plugin.ini
+    state: link
+
+# 5. DB Sync
+- name: Neutron DB Sync
+  become_user: neutron
+  command: neutron-db-manage --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/plugins/ml2/ml2_conf.ini upgrade head
+
+# 6. OVN 서비스 시작
+- name: OVN 서비스 시작
+  service:
+    name: "{{ item }}"
+    state: started
+    enabled: yes
+  with_items:
+    - ovn-northd
+
+- name: OVS 데몬 활성화 및 시작
+  service:
+    name: "{{ item }}"
+    state: started
+    enabled: yes
+  loop:
+    - ovsdb-server
+    - ovs-vswitchd
+  failed_when: false
+
+- name: OVS 통합 브릿지(br-int) 생성
+  command: ovs-vsctl --may-exist add-br br-int
+  changed_when: false
+
+# 3. OVN 노스바운드(NB) DB 연결 설정 (포트 6641)
+- name: OVN NB DB 접속 포트 설정
+  command: >
+    ovn-nbctl set-connection ptcp:6641:{{ mgmt_ip }} 
+    -- set connection . inactivity_probe=60000
+  changed_when: false
+
+# 4. OVN 사우스바운드(SB) DB 연결 설정 (포트 6642)
+- name: OVN SB DB 접속 포트 설정
+  command: >
+    ovn-sbctl set-connection ptcp:6642:{{ mgmt_ip }} 
+    -- set connection . inactivity_probe=60000
+  changed_when: false
+
+# 5. 컨트롤러를 게이트웨이(GW)로 설정
+- name: 컨트롤러 노드를 OVN 게이트웨이로 설정
+  command: ovs-vsctl set open . external-ids:ovn-cms-options=enable-chassis-as-gw
+  changed_when: false
+
+# 6. Neutron 서버 및 OVN 서비스 재시작
+- name: Neutron 및 OVN 서비스 재시작
+  service:
+    name: "{{ item }}"
+    state: restarted
+    enabled: yes
+  with_items:
+    - ovn-northd
+    - neutron-server

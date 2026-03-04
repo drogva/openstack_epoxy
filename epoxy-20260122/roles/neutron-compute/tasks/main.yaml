@@ -1,0 +1,77 @@
+- name: 컴퓨트 노드 Neutron 및 OVN 패키지 설치
+  dnf:
+    name:
+      - openstack-neutron
+      - openstack-neutron-ml2
+      - openstack-neutron-ovn-metadata-agent
+      - ovn24.09-host
+    state: present
+
+- name: neutron.conf 및 metadata_agent.ini 배포
+  template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: neutron
+    group: neutron
+    mode: '0640'
+  with_items:
+    - { src: 'neutron.conf.j2', dest: '/etc/neutron/neutron.conf' }
+    - { src: 'neutron_ovn_metadata_agent.ini.j2', dest: '/etc/neutron/neutron_ovn_metadata_agent.ini' }
+    - { src: 'ml2_conf.ini.j2', dest: '/etc/neutron/plugins/ml2/ml2_conf.ini' }
+  
+  # [추가] 심볼릭 링크 생성
+- name: ML2 설정 파일 심볼릭 링크 생성
+  file:
+    src: /etc/neutron/plugins/ml2/ml2_conf.ini
+    dest: /etc/neutron/plugin.ini
+    state: link
+
+- name: OVSDB 서버 리모트 설정 (ptcp)
+  lineinfile:
+    path: /etc/sysconfig/openvswitch
+    regexp: '^OPTIONS='
+    line: |
+      OPTIONS="--ovsdb-server-options='--remote=ptcp:6640:127.0.0.1'"
+
+- name: OVS 및 OVN 컨트롤러 서비스 활성화
+  service:
+    name: "{{ item }}"
+    state: restarted
+    enabled: yes
+  with_items:
+    - openvswitch
+    - ovn-controller
+    - neutron-ovn-metadata-agent
+
+- name: OVN 리모트 및 IP 설정
+  command: "{{ item }}"
+  with_items:
+    - "ovs-vsctl set open . external-ids:ovn-remote=tcp:{{ hostvars['controller']['mgmt_ip'] }}:6642"
+    - "ovs-vsctl set open . external-ids:ovn-encap-type=geneve"
+    - "ovs-vsctl set open . external-ids:ovn-encap-ip={{ compute_ip }}"
+    - "ovs-vsctl set open . external-ids:ovn-cms-options=enable-chassis-as-gw"
+    - "ovs-vsctl set bridge br-int protocols=OpenFlow10,OpenFlow11,OpenFlow12,OpenFlow13,OpenFlow14,OpenFlow15"
+
+- name: Nova Compute 서비스 재시작 (네트워크 적용)
+  service:
+    name: openstack-nova-compute
+    state: restarted
+
+- name: Nova Compute 서비스 재시작 (네트워크 적용)
+  service:
+    name: openstack-nova-compute
+    state: restarted
+
+- name: 외부 통신용 OVS 브릿지 생성
+  openvswitch_bridge:
+    bridge: "{{ external_bridge }}"
+    state: present
+
+- name: 인터페이스를 브릿지에 연결
+  openvswitch_port:
+    bridge: "{{ external_bridge }}"
+    port: "{{ external_interface }}"
+    state: present
+
+- name: OVN 브릿지 매핑 설정 (physnet1)
+  command: "ovs-vsctl set open . external-ids:ovn-bridge-mappings=physnet1:{{ external_bridge }}"

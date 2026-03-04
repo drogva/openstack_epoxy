@@ -1,0 +1,114 @@
+# 1. Glance 데이터베이스 및 권한 생성
+- name: Glance 데이터베이스 생성
+  mysql_db:
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    login_host: "{{ mgmt_ip }}"
+    login_unix_socket: /var/lib/mysql/mysql.sock
+    name: glance
+    state: present
+  run_once: true
+
+- name: Glance 데이터베이스 권한 부여
+  mysql_user:
+    login_user: root
+    login_unix_socket: /var/lib/mysql/mysql.sock
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    login_host: "{{ mgmt_ip }}"
+    name: glance
+    password: "{{ GLANCE_DBPASS }}"
+    priv: 'glance.*:ALL'
+    host: "{{ item }}"
+    state: present
+  with_items: ['localhost', '%']
+  run_once: true
+
+# 2. Glance 서비스 계정 및 엔드포인트 생성
+
+- name: Glance 사용자 생성
+  openstack.cloud.identity_user:
+    auth:
+      auth_url: "http://{{ controller_host }}:5000/v3"
+      username: "admin"
+      password: "{{ keystone_admin_password }}"
+      project_name: "admin"
+      user_domain_name: "Default"
+      project_domain_name: "Default"
+    name: glance
+    password: "{{GLANCE_PASS}}"
+    domain: default
+    state: present
+
+- name: Glance 사용자에게 admin 역할 부여
+  openstack.cloud.role_assignment:
+    auth:
+      auth_url: "http://{{ controller_host }}:5000/v3"
+      username: "admin"
+      password: "{{ keystone_admin_password }}"
+      project_name: "admin"
+      user_domain_name: "Default"
+      project_domain_name: "Default"
+
+      # ... (위와 동일한 인증 정보)
+    user: glance
+    role: admin
+    project: service
+    state: present
+
+- name: Glance 서비스 엔터티 생성
+  openstack.cloud.catalog_service:
+    auth:
+      auth_url: "http://{{ controller_host }}:5000/v3"
+      username: "admin"
+      password: "{{ keystone_admin_password }}"
+      project_name: "admin"
+      user_domain_name: "Default"
+      project_domain_name: "Default"
+    name: glance
+    type: image
+    description: "OpenStack Image Service"
+    state: present
+
+- name: Glance API 엔드포인트 생성
+  openstack.cloud.endpoint:
+    auth:
+      auth_url: "http://{{ controller_host }}:5000/v3"
+      username: "admin"
+      password: "{{ keystone_admin_password }}"
+      project_name: "admin"
+      user_domain_name: "Default"
+      project_domain_name: "Default"
+    service: glance
+    endpoint_interface: "{{ item.interface }}"
+    url: "http://{{ controller_host }}:9292"
+    region: RegionOne
+    state: present
+  with_items:
+    - { interface: 'public' }
+    - { interface: 'internal' }
+    - { interface: 'admin' }
+# 3. 패키지 설치 및 설정
+- name: Glance 패키지 설치
+  dnf:
+    name: openstack-glance
+    state: present
+
+- name: glance-api.conf 설정 파일 적용
+  template:
+    src: glance-api.conf.j2
+    dest: /etc/glance/glance-api.conf
+    owner: glance
+    group: glance
+    mode: '0640'
+
+# 4. DB Sync 및 서비스 시작
+- name: Glance 데이터베이스 동기화
+  become_user: glance
+  command: glance-manage db_sync
+
+- name: Glance 서비스 활성화 및 시작
+  service:
+    name: openstack-glance-api.service
+    state: started
+    enabled: yes
