@@ -193,12 +193,13 @@
     enable_dhcp: false # 외부망은 보통 DHCP를 끕니다
     state: present
 
-- name: 공식 Amphora 이미지 다운로드 (wget으로 강제 실행)
-  shell: |
-    wget -c "https://nbg1.your-objectstorage.com/osism/openstack-octavia-amphora-image/octavia-amphora-haproxy-2025.1.qcow2" \
-    -O /root/amphora-haproxy-epoxy.qcow2
-  args:
-    creates: /root/amphora-haproxy-epoxy.qcow2
+- name: 공식 Amphora 이미지 다운로드 (Epoxy 버전)
+  get_url:
+    url: "https://nbg1.your-objectstorage.com/osism/openstack-octavia-amphora-image/octavia-amphora-haproxy-2025.1.qcow2"
+    dest: "/root/amphora-haproxy-epoxy.qcow2"
+    timeout: 600           # 10분(600초)으로 상향
+    validate_certs: no    # SSL 인증서 체크 지연 방지
+    force: no             # 이미 파일이 있으면 다시 받지 않음
 
 
 
