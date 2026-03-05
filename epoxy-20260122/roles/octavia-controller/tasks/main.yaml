@@ -206,6 +206,9 @@
   get_url:
     url: "https://nbg1.your-objectstorage.com/osism/openstack-octavia-amphora-image/octavia-amphora-haproxy-2025.1.qcow2"
     dest: "/root/amphora-haproxy-epoxy.qcow2"
+    timeout: 900           # 15분(900초)으로 넉넉히 늘립니다.
+    validate_certs: no    # SSL 인증서 체크로 인한 지연 방지
+    mode: '0644'
  
 
 - name: Amphora 이미지를 RAW 포맷으로 변환
